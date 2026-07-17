@@ -1,128 +1,129 @@
-
 """
-Memory Kernel for Higgs Hierarchy Stabilization
-UDCT v2.6.7 - Adaptive Threshold Version
+memory_kernel.py
 
-This module implements an adaptive memory kernel with:
-- Welford's online algorithm for numerical stability
-- Dynamic threshold based on running standard deviation
-- Outlier rejection using median
-- Phase jump fast adaptation
+Adaptive Memory Kernel for stabilizing Monte Carlo time series.
+This module implements a robust memory-assisted smoothing algorithm
+designed for lattice gauge theory simulations, particularly for
+Higgs hierarchy stabilization studies (UDCT v2.6.7).
+
+Key features:
+- Welford's online algorithm for numerically stable mean/variance updates
+- Median-based outlier rejection to protect memory from large fluctuations
+- Adaptive exponential moving average with warm-up phase
+- Phase jump detection for tracking sudden shifts in the underlying signal
+
+Author: Won Shik Paik
 """
 
 import numpy as np
-from collections import deque
+from numba import njit
 
 
-class MemoryKernel:
+@njit
+def welford_update(existing_aggregate, new_value):
     """
-    Adaptive Memory Kernel with dynamic threshold and phase jump detection.
-    Designed for long-running Monte Carlo simulations (e.g., Higgs hierarchy studies).
+    Perform one step of Welford's online algorithm for numerically stable
+    calculation of mean and variance.
+
+    Parameters
+    ----------
+    existing_aggregate : tuple
+        (count, mean, M2) from previous steps
+    new_value : float
+        New data point to incorporate
+
+    Returns
+    -------
+    tuple
+        Updated (count, mean, M2)
     """
+    (count, mean, M2) = existing_aggregate
+    count += 1
+    delta = new_value - mean
+    mean += delta / count
+    delta2 = new_value - mean
+    M2 += delta * delta2
+    return (count, mean, M2)
 
-    def __init__(self, 
-                 memory_length: int = 20,
-                 decay_factor: float = 0.85,
-                 outlier_threshold: float = 0.008,
-                 large_diff_threshold: float = 0.007,
-                 min_large_diff_threshold: float = 0.0025,
-                 adaptive_threshold_factor: float = 2.8,
-                 phase_jump_adaptation_steps: int = 8):
-        
-        self.memory_length = memory_length
-        self.decay_factor = decay_factor
-        self.outlier_threshold = outlier_threshold
-        self.large_diff_threshold = large_diff_threshold
-        self.min_large_diff_threshold = min_large_diff_threshold
-        self.adaptive_threshold_factor = adaptive_threshold_factor
-        self.phase_jump_adaptation_steps = phase_jump_adaptation_steps
 
-        # Internal states
-        self.history = deque(maxlen=memory_length)
-        self.smoothed_output = None
-        self.last_smoothed = None
-        
-        # Welford's algorithm variables
-        self.count = 0
-        self.mean = 0.0
-        self.M2 = 0.0
-        
-        # Phase jump adaptation
-        self.adaptation_counter = 0
-        self.current_decay = decay_factor
+@njit
+def calculate_variance(existing_aggregate):
+    """
+    Calculate variance from Welford aggregate.
+    Returns 0.0 if count < 2.
+    """
+    (count, mean, M2) = existing_aggregate
+    if count < 2:
+        return 0.0
+    return M2 / (count - 1)
 
-    def _update_welford(self, value: float):
-        """Update running mean and variance using Welford's algorithm."""
-        self.count += 1
-        delta = value - self.mean
-        self.mean += delta / self.count
-        delta2 = value - self.mean
-        self.M2 += delta * delta2
 
-    def _get_std(self) -> float:
-        """Return current standard deviation."""
-        if self.count < 2:
-            return 0.0
-        return np.sqrt(self.M2 / (self.count - 1))
+@njit
+def memory_kernel(raw_series, alpha=0.12, outlier_threshold=0.008,
+                  large_diff_threshold=0.003, warm_up_steps=20):
+    """
+    Apply Adaptive Memory Kernel to a raw time series.
 
-    def _get_dynamic_large_diff_threshold(self) -> float:
-        """Compute adaptive threshold for phase jump detection."""
-        current_std = self._get_std()
-        dynamic_threshold = current_std * self.adaptive_threshold_factor
-        return max(self.min_large_diff_threshold, dynamic_threshold)
+    The kernel combines:
+    1. Outlier rejection (protects memory from extreme spikes)
+    2. Welford-based online statistics for stability
+    3. Adaptive exponential smoothing with warm-up phase
+    4. Phase jump detection (tracks genuine shifts in the signal)
 
-    def apply(self, raw_value: float) -> float:
-        """
-        Apply memory kernel to a new raw value.
-        Returns the smoothed output.
-        """
-        # Warm-up phase
-        if len(self.history) < self.memory_length:
-            self.history.append(raw_value)
-            self._update_welford(raw_value)
-            self.smoothed_output = raw_value
-            self.last_smoothed = raw_value
-            return raw_value
+    Parameters
+    ----------
+    raw_series : np.ndarray
+        1D array of raw Monte Carlo measurements (e.g., plaquette values)
+    alpha : float
+        Base smoothing factor for exponential moving average (default: 0.12)
+    outlier_threshold : float
+        Threshold for detecting outliers (default: 0.008)
+    large_diff_threshold : float
+        Threshold for detecting phase jumps (default: 0.003)
+    warm_up_steps : int
+        Number of initial steps to use higher alpha for faster adaptation
 
-        # Update history
-        self.history.append(raw_value)
-        self._update_welford(raw_value)
+    Returns
+    -------
+    np.ndarray
+        Smoothed time series after applying the memory kernel
+    """
+    n = len(raw_series)
+    smoothed = np.empty(n)
+    smoothed[0] = raw_series[0]
 
-        # Outlier detection using median
-        median = np.median(self.history)
-        if abs(raw_value - median) > self.outlier_threshold:
-            # Treat as outlier: return previous smoothed value
-            return self.last_smoothed
+    # Initialize Welford aggregates
+    agg = (1, raw_series[0], 0.0)
 
-        # Phase jump detection
-        dynamic_threshold = self._get_dynamic_large_diff_threshold()
-        diff = abs(raw_value - self.last_smoothed)
+    for t in range(1, n):
+        current = raw_series[t]
+        previous_smoothed = smoothed[t - 1]
 
-        if diff > dynamic_threshold:
-            # Activate fast adaptation
-            self.adaptation_counter = self.phase_jump_adaptation_steps
-            self.current_decay = 0.55  # temporarily faster adaptation
+        # Calculate deviation from current memory state
+        diff = abs(current - previous_smoothed)
+
+        # === Outlier Rejection ===
+        if diff > outlier_threshold:
+            # Treat as outlier: do not update memory aggressively
+            smoothed[t] = previous_smoothed
+            continue
+
+        # === Phase Jump Detection ===
+        if diff > large_diff_threshold:
+            # Genuine shift detected → increase responsiveness temporarily
+            effective_alpha = min(0.5, alpha * 3.0)
         else:
-            if self.adaptation_counter > 0:
-                self.adaptation_counter -= 1
-            else:
-                self.current_decay = self.decay_factor
+            effective_alpha = alpha
 
-        # Exponential smoothing
-        if self.smoothed_output is None:
-            self.smoothed_output = raw_value
-        else:
-            self.smoothed_output = (self.current_decay * self.smoothed_output +
-                                    (1 - self.current_decay) * raw_value)
+        # === Warm-up Phase (faster adaptation at the beginning) ===
+        if t < warm_up_steps:
+            effective_alpha = max(effective_alpha, 0.3)
 
-        self.last_smoothed = self.smoothed_output
-        return self.smoothed_output
+        # === Welford Update + Exponential Smoothing ===
+        agg = welford_update(agg, current)
+        variance = calculate_variance(agg)
 
-    def get_stats(self):
-        """Return current statistics for debugging."""
-        return {
-            'mean': self.mean,
-            'std': self._get_std(),
-            'smoothed': self.smoothed_output,
-            'adaptation_active': self.adaptation_counter > 0
-        }
+        # Adaptive smoothing
+        smoothed[t] = (1 - effective_alpha) * previous_smoothed + effective_alpha * current
+
+    return smoothed
