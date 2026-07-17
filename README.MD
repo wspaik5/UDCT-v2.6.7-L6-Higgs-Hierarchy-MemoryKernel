@@ -48,3 +48,12 @@ If you use this code or results in your research, please cite the following tech
 
 Author: Won Shik Paik  
 Email: wspaik5@gmail.com
+
+
+## Future Work
+
+- Extend simulations to larger lattice sizes (L=8, L=12) with higher statistics
+- Apply the Adaptive Memory Kernel to non-Abelian gauge theories (SU(2), SU(3))
+- Integrate with Cl(8) geometric back-reaction framework for Higgs hierarchy stabilization
+- Systematic finite-size scaling study and autocorrelation time analysis
+- Prepare v2.6.8 and v2.6.9 with improved adaptive thresholding and dynamic aging
