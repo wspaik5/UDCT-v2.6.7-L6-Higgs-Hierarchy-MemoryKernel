@@ -31,3 +31,10 @@ This repository contains the Python implementation and results for **UDCT v2.6.7
 cd python
 python u1_monte_carlo_L6.py          # Run Monte Carlo simulation
 python apply_memory_kernel_L6.py     # Apply Memory Kernel and generate plots
+
+
+If you use this code or results in your research, please cite the corresponding 
+technical note:
+
+UDCT v2.6.7: Higgs Hierarchy Stabilization via Adaptive Memory Kernel 
+– Python Implementation Technical Note (2026)
