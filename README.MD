@@ -38,3 +38,13 @@ technical note:
 
 UDCT v2.6.7: Higgs Hierarchy Stabilization via Adaptive Memory Kernel 
 – Python Implementation Technical Note (2026)
+
+
+## How to Cite
+
+If you use this code or results in your research, please cite the following technical note:
+
+**UDCT v2.6.7: Higgs Hierarchy Stabilization via Adaptive Memory Kernel – Python Implementation Technical Note** (2026)
+
+Author: Won Shik Paik  
+Email: wspaik5@gmail.com
