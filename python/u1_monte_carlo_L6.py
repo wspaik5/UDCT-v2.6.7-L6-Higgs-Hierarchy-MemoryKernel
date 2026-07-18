@@ -1,4 +1,4 @@
-9"""
+"""
 u1_monte_carlo_L6.py
 
 Compact U(1) lattice gauge theory Monte Carlo simulation on L=6 lattice.
@@ -138,5 +138,31 @@ def main():
     print("Thermalization completed.")
 
     # === Measurement ===
+    print("\nStarting measurement phase...")
+    plaquette_series = []
+
+    for i in range(n_measurement):
+        metropolis_sweep(theta, beta, L, n_sweeps=sweeps_per_measurement)
+        plaq = calculate_average_plaquette(theta, L)
+        plaquette_series.append(plaq)
+
+        if (i + 1) % 500 == 0:
+            print(f"  Measurement {i+1}/{n_measurement} | Plaquette: {plaq:.6f}")
+
+    plaquette_series = np.array(plaquette_series)
+
+    # === Save results ===
+    output_file = "plaquette_series_L6_beta1.0.npy"
+    np.save(output_file, plaquette_series)
+
+    print("\n" + "=" * 60)
+    print("Simulation completed successfully!")
+    print(f"Data saved as: {output_file}")
+    print(f"Number of measurements: {len(plaquette_series)}")
+    print(f"Mean plaquette: {np.mean(plaquette_series):.6f}")
+    print(f"Std plaquette : {np.std(plaquette_series):.6f}")
+    print("=" * 60)
 
 
+if __name__ == "__main__":
+    main()
